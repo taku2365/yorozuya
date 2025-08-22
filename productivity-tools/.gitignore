@@ -53,3 +53,9 @@ e2e-test-*.md
 test-*.txt
 test-fix-guide.md
 test-analysis.txt
+productivity-tools-wbs-improvements.md
+
+# images
+*.png
+*.jpg
+*.jpeg
