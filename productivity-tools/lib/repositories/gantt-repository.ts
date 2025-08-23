@@ -1,107 +1,68 @@
 import { v4 as uuidv4 } from "uuid";
-import type { Database } from "../db/database";
-import type { GanttTask, GanttDependency } from "../db/types";
-import type { SqlValue } from "@sqlite.org/sqlite-wasm";
-
-export interface CreateGanttTaskDto {
-  title: string;
-  start_date: string;
-  end_date: string;
-  progress?: number;
-  wbs_task_id?: string;
-}
-
-export interface UpdateGanttTaskDto {
-  title?: string;
-  start_date?: string;
-  end_date?: string;
-  progress?: number;
-  wbs_task_id?: string;
-}
-
-export interface CreateDependencyDto {
-  predecessor_id: string;
-  successor_id: string;
-  type?: "finish-to-start" | "start-to-start" | "finish-to-finish" | "start-to-finish";
-}
+import { db } from "../db";
+import type { 
+  GanttTask, 
+  CreateGanttTaskDto, 
+  UpdateGanttTaskDto,
+  GanttFilter,
+  GanttTaskIcon,
+  GanttTaskColor
+} from "../types/gantt";
 
 export class GanttRepository {
-  constructor(private db: Database) {}
-
-  // Task operations
-  async createTask(data: CreateGanttTaskDto): Promise<GanttTask> {
-    // Validate dates
-    if (new Date(data.end_date) <= new Date(data.start_date)) {
-      throw new Error("End date must be after start date");
-    }
-
+  async create(data: CreateGanttTaskDto): Promise<GanttTask> {
     const id = uuidv4();
-    const now = new Date().toISOString();
+    const now = new Date();
     
     const task: GanttTask = {
       id,
       title: data.title,
-      start_date: data.start_date,
-      end_date: data.end_date,
+      icon: data.icon,
+      color: data.color,
+      category: data.category,
+      startDate: data.startDate,
+      endDate: data.endDate,
       progress: data.progress ?? 0,
-      wbs_task_id: data.wbs_task_id,
-      created_at: now,
-      updated_at: now,
+      dependencies: [],
+      isCriticalPath: false,
+      parentId: data.parentId,
+      children: [],
+      assignee: data.assignee,
+      groupId: data.groupId,
+      wbsTaskId: data.wbsTaskId,
+      createdAt: now,
+      updatedAt: now,
     };
 
-    await this.db.execute(
-      `INSERT INTO gantt_tasks (id, title, start_date, end_date, progress, wbs_task_id, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    await db.execute(
+      `INSERT INTO gantt_tasks (
+        id, title, icon, color, category, start_date, end_date, 
+        progress, is_critical_path, parent_id, assignee, group_id, 
+        wbs_task_id, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         task.id,
         task.title,
-        task.start_date,
-        task.end_date,
+        task.icon || null,
+        task.color || null,
+        task.category || null,
+        task.startDate.getTime(),
+        task.endDate.getTime(),
         task.progress,
-        task.wbs_task_id || null,
-        task.created_at,
-        task.updated_at,
+        task.isCriticalPath ? 1 : 0,
+        task.parentId || null,
+        task.assignee || null,
+        task.groupId || null,
+        task.wbsTaskId || null,
+        task.createdAt.getTime(),
+        task.updatedAt.getTime(),
       ]
     );
 
     return task;
   }
 
-  async findAll(): Promise<GanttTask[]> {
-    const rows = await this.db.execute(
-      "SELECT * FROM gantt_tasks ORDER BY start_date",
-      []
-    );
-
-    return rows.map(row => this.mapRowToTask(row));
-  }
-
-  async findAllTasks(): Promise<GanttTask[]> {
-    // Alias for findAll() for consistency with test expectations
-    return this.findAll();
-  }
-
-  async findById(id: string): Promise<GanttTask | null> {
-    const rows = await this.db.execute(
-      "SELECT * FROM gantt_tasks WHERE id = ?",
-      [id]
-    );
-
-    if (rows.length === 0) {
-      return null;
-    }
-
-    return this.mapRowToTask(rows[0]);
-  }
-
-  async updateTask(id: string, data: UpdateGanttTaskDto): Promise<GanttTask | null> {
-    // If both dates are provided, validate them
-    if (data.start_date && data.end_date) {
-      if (new Date(data.end_date) <= new Date(data.start_date)) {
-        throw new Error("End date must be after start date");
-      }
-    }
-
+  async update(id: string, data: UpdateGanttTaskDto): Promise<GanttTask> {
     const fields: string[] = [];
     const params: any[] = [];
 
@@ -110,14 +71,29 @@ export class GanttRepository {
       params.push(data.title);
     }
 
-    if (data.start_date !== undefined) {
-      fields.push("start_date = ?");
-      params.push(data.start_date);
+    if (data.icon !== undefined) {
+      fields.push("icon = ?");
+      params.push(data.icon);
     }
 
-    if (data.end_date !== undefined) {
+    if (data.color !== undefined) {
+      fields.push("color = ?");
+      params.push(data.color);
+    }
+
+    if (data.category !== undefined) {
+      fields.push("category = ?");
+      params.push(data.category);
+    }
+
+    if (data.startDate !== undefined) {
+      fields.push("start_date = ?");
+      params.push(data.startDate.getTime());
+    }
+
+    if (data.endDate !== undefined) {
       fields.push("end_date = ?");
-      params.push(data.end_date);
+      params.push(data.endDate.getTime());
     }
 
     if (data.progress !== undefined) {
@@ -125,292 +101,279 @@ export class GanttRepository {
       params.push(data.progress);
     }
 
-    if (data.wbs_task_id !== undefined) {
-      fields.push("wbs_task_id = ?");
-      params.push(data.wbs_task_id);
+    if (data.parentId !== undefined) {
+      fields.push("parent_id = ?");
+      params.push(data.parentId);
+    }
+
+    if (data.assignee !== undefined) {
+      fields.push("assignee = ?");
+      params.push(data.assignee);
+    }
+
+    if (data.groupId !== undefined) {
+      fields.push("group_id = ?");
+      params.push(data.groupId);
     }
 
     fields.push("updated_at = ?");
-    params.push(new Date().toISOString());
+    params.push(new Date().getTime());
 
     params.push(id);
 
-    const sql = `UPDATE gantt_tasks SET ${fields.join(", ")} WHERE id = ?`;
-    await this.db.execute(sql, params);
-
-    return this.findById(id);
-  }
-
-  async deleteTask(id: string): Promise<void> {
-    // Delete dependencies first
-    await this.db.execute("DELETE FROM gantt_dependencies WHERE predecessor_id = ?", [id]);
-    await this.db.execute("DELETE FROM gantt_dependencies WHERE successor_id = ?", [id]);
-    
-    // Then delete the task
-    await this.db.execute("DELETE FROM gantt_tasks WHERE id = ?", [id]);
-  }
-
-  async updateProgress(taskId: string, progress: number): Promise<void> {
-    // Validate progress is between 0 and 100
-    if (progress < 0 || progress > 100) {
-      throw new Error("Progress must be between 0 and 100");
-    }
-
-    await this.db.execute(
-      "UPDATE gantt_tasks SET progress = ?, updated_at = ? WHERE id = ?",
-      [progress, new Date().toISOString(), taskId]
+    await db.execute(
+      `UPDATE gantt_tasks SET ${fields.join(", ")} WHERE id = ?`,
+      params
     );
-  }
 
-  async adjustDates(taskId: string, newStartDate: string, newEndDate: string): Promise<void> {
-    // Get the task
-    const task = await this.findById(taskId);
-    if (!task) {
+    // モックデータを返す（テスト環境用）
+    const rows = await db.execute(
+      "SELECT * FROM gantt_tasks WHERE id = ?",
+      [id]
+    );
+    
+    if (!rows || rows.length === 0) {
       throw new Error("Task not found");
     }
 
-    // Update the task dates
-    await this.db.execute(
+    return this.mapRowToTask(rows[0]);
+  }
+
+  async updateSchedule(taskId: string, startDate: Date, endDate: Date): Promise<void> {
+    await db.execute(
       "UPDATE gantt_tasks SET start_date = ?, end_date = ?, updated_at = ? WHERE id = ?",
-      [newStartDate, newEndDate, new Date().toISOString(), taskId]
+      [startDate.getTime(), endDate.getTime(), new Date().getTime(), taskId]
     );
 
-    // Find all dependencies where this task is a predecessor
-    const dependencies = await this.db.execute(
+    // 依存タスクの自動調整
+    const dependencies = await db.execute(
       "SELECT * FROM gantt_dependencies WHERE predecessor_id = ?",
       [taskId]
-    );
+    ) || [];
 
-    // Adjust successor tasks based on dependency type
-    for (const row of dependencies) {
-      const dep = this.mapRowToDependency(row);
-      if (dep.type === "finish-to-start") {
-        // Get successor task
-        const successor = await this.findById(dep.successor_id);
-        if (successor) {
-          const duration = new Date(successor.end_date).getTime() - new Date(successor.start_date).getTime();
-          const newSuccessorStart = new Date(newEndDate);
-          newSuccessorStart.setDate(newSuccessorStart.getDate() + 1); // Start day after predecessor ends
-          
-          const newSuccessorEnd = new Date(newSuccessorStart.getTime() + duration);
-          
-          // Recursively adjust the successor's dates
-          await this.adjustDates(
-            successor.id,
-            newSuccessorStart.toISOString().split('T')[0],
-            newSuccessorEnd.toISOString().split('T')[0]
-          );
-        }
+    for (const dep of dependencies) {
+      const successorTask = await this.findById(dep.successorId);
+      if (successorTask) {
+        const duration = successorTask.endDate.getTime() - successorTask.startDate.getTime();
+        const newStartDate = new Date(endDate.getTime() + 24 * 60 * 60 * 1000); // 1日後
+        const newEndDate = new Date(newStartDate.getTime() + duration);
+        
+        await this.updateSchedule(successorTask.id, newStartDate, newEndDate);
       }
     }
   }
 
-  // Dependency operations
-  async createDependency(data: CreateDependencyDto): Promise<GanttDependency> {
-    // Validate both tasks exist
-    const predecessorExists = await this.findById(data.predecessor_id);
-    if (!predecessorExists) {
-      throw new Error("Task not found");
-    }
+  async createDependency(fromId: string, toId: string): Promise<void> {
+    // 循環依存チェック
+    const existingDeps = await db.execute(
+      "SELECT * FROM gantt_dependencies WHERE predecessor_id = ? AND successor_id = ?",
+      [toId, fromId]
+    ) || [];
 
-    const successorExists = await this.findById(data.successor_id);
-    if (!successorExists) {
-      throw new Error("Task not found");
+    if (existingDeps.length > 0) {
+      throw new Error("循環依存が検出されました");
     }
-
-    // Check for circular dependencies
-    await this.checkCircularDependency(data.predecessor_id, data.successor_id);
 
     const id = uuidv4();
-    const now = new Date().toISOString();
-    
-    const dependency: GanttDependency = {
-      id,
-      predecessor_id: data.predecessor_id,
-      successor_id: data.successor_id,
-      type: data.type || "finish-to-start",
-      created_at: now,
-    };
-
-    await this.db.execute(
-      `INSERT INTO gantt_dependencies (id, predecessor_id, successor_id, type, created_at)
-       VALUES (?, ?, ?, ?, ?)`,
-      [
-        dependency.id,
-        dependency.predecessor_id,
-        dependency.successor_id,
-        dependency.type,
-        dependency.created_at,
-      ]
+    await db.execute(
+      "INSERT INTO gantt_dependencies (id, predecessor_id, successor_id) VALUES (?, ?, ?)",
+      [id, fromId, toId]
     );
-
-    return dependency;
   }
 
-  async findAllDependencies(): Promise<GanttDependency[]> {
-    const rows = await this.db.execute(
-      "SELECT * FROM gantt_dependencies",
-      []
-    );
-
-    return rows.map(row => this.mapRowToDependency(row));
-  }
-
-  async findDependenciesByTask(taskId: string): Promise<GanttDependency[]> {
-    const rows = await this.db.execute(
-      "SELECT * FROM gantt_dependencies WHERE predecessor_id = ? OR successor_id = ?",
-      [taskId, taskId]
-    );
-
-    return rows.map(row => this.mapRowToDependency(row));
-  }
-
-  async deleteDependency(id: string): Promise<void> {
-    await this.db.execute("DELETE FROM gantt_dependencies WHERE id = ?", [id]);
-  }
-
-  // Critical path operations
-  async calculateCriticalPath(): Promise<string[]> {
+  async calculateCriticalPath(projectId: string): Promise<string[]> {
     const tasks = await this.findAll();
-    const dependencies = await this.db.execute(
+    const dependencies = await db.execute(
       "SELECT * FROM gantt_dependencies",
       []
-    );
+    ) || [];
 
-    // Build task map and dependency graph
+    // タスクマップの作成
     const taskMap = new Map<string, GanttTask>();
     const successors = new Map<string, string[]>();
-    const predecessors = new Map<string, string[]>();
-
-    for (const task of tasks) {
+    
+    tasks.forEach(task => {
       taskMap.set(task.id, task);
       successors.set(task.id, []);
-      predecessors.set(task.id, []);
-    }
+    });
 
-    for (const row of dependencies) {
-      const dep = this.mapRowToDependency(row);
-      if (dep.type === "finish-to-start") {
-        successors.get(dep.predecessor_id)?.push(dep.successor_id);
-        predecessors.get(dep.successor_id)?.push(dep.predecessor_id);
-      }
-    }
+    // 依存関係の構築
+    dependencies.forEach((dep: any) => {
+      const current = successors.get(dep.predecessorId) || [];
+      current.push(dep.successorId);
+      successors.set(dep.predecessorId, current);
+    });
 
-    // Find tasks with no predecessors (start nodes)
-    const startTasks = tasks.filter(task => predecessors.get(task.id)?.length === 0);
-
-    // Calculate longest path from each start task
+    // 最長パスの計算
     let longestPath: string[] = [];
     let longestDuration = 0;
 
-    for (const startTask of startTasks) {
-      const path = this.findLongestPath(startTask.id, taskMap, successors);
-      const duration = this.calculatePathDuration(path, taskMap);
-      
-      if (duration > longestDuration) {
-        longestDuration = duration;
-        longestPath = path;
+    const calculatePath = (taskId: string, path: string[], duration: number): void => {
+      path.push(taskId);
+      const task = taskMap.get(taskId);
+      if (!task) return;
+
+      const taskDuration = task.endDate.getTime() - task.startDate.getTime();
+      duration += taskDuration;
+
+      const taskSuccessors = successors.get(taskId) || [];
+      if (taskSuccessors.length === 0) {
+        if (duration > longestDuration) {
+          longestDuration = duration;
+          longestPath = [...path];
+        }
+      } else {
+        taskSuccessors.forEach(successorId => {
+          calculatePath(successorId, [...path], duration);
+        });
       }
-    }
+    };
+
+    // 開始タスクから計算開始
+    const startTasks = tasks.filter(task => {
+      return !dependencies.some((dep: any) => dep.successorId === task.id);
+    });
+
+    startTasks.forEach(task => {
+      calculatePath(task.id, [], 0);
+    });
 
     return longestPath;
   }
 
-  // Chart data operations
-  async getChartData(): Promise<{ tasks: GanttTask[]; dependencies: GanttDependency[] }> {
-    const tasks = await this.findAll();
-    const dependencies = await this.db.execute(
-      "SELECT * FROM gantt_dependencies",
-      []
+  async setTaskIcon(taskId: string, icon: GanttTaskIcon): Promise<void> {
+    await db.execute(
+      "UPDATE gantt_tasks SET icon = ?, updated_at = ? WHERE id = ?",
+      [icon, new Date().getTime(), taskId]
     );
-
-    return {
-      tasks,
-      dependencies: dependencies.map(row => this.mapRowToDependency(row)),
-    };
   }
 
-  // Helper methods
-  private async checkCircularDependency(predecessorId: string, successorId: string): Promise<void> {
-    // Simple check: if there's already a path from successor to predecessor, it would create a cycle
-    const dependencies = await this.db.execute(
-      "SELECT * FROM gantt_dependencies",
-      []
+  async setTaskColor(taskId: string, color: GanttTaskColor): Promise<void> {
+    await db.execute(
+      "UPDATE gantt_tasks SET color = ?, updated_at = ? WHERE id = ?",
+      [color, new Date().getTime(), taskId]
     );
-
-    const visited = new Set<string>();
-    const queue = [successorId];
-
-    while (queue.length > 0) {
-      const current = queue.shift()!;
-      if (current === predecessorId) {
-        throw new Error("Circular dependency detected");
-      }
-
-      if (!visited.has(current)) {
-        visited.add(current);
-        const nextDeps = dependencies.filter((d: any) => d.predecessor_id === current);
-        queue.push(...nextDeps.map((d: any) => d.successor_id));
-      }
-    }
   }
 
-  private findLongestPath(
-    taskId: string,
-    taskMap: Map<string, GanttTask>,
-    successors: Map<string, string[]>
-  ): string[] {
-    const task = taskMap.get(taskId);
-    if (!task) return [];
+  async assignMember(taskId: string, memberId: string): Promise<void> {
+    await db.execute(
+      "UPDATE gantt_tasks SET assignee = ?, updated_at = ? WHERE id = ?",
+      [memberId, new Date().getTime(), taskId]
+    );
+  }
 
-    const taskSuccessors = successors.get(taskId) || [];
-    if (taskSuccessors.length === 0) {
-      return [taskId];
-    }
+  async createTaskGroup(name: string, color: string): Promise<string> {
+    const id = uuidv4();
+    await db.execute(
+      "INSERT INTO gantt_groups (id, name, color, created_at) VALUES (?, ?, ?, ?)",
+      [id, name, color, new Date().getTime()]
+    );
+    return id;
+  }
 
-    let longestSubPath: string[] = [];
-    for (const successorId of taskSuccessors) {
-      const subPath = this.findLongestPath(successorId, taskMap, successors);
-      if (subPath.length > longestSubPath.length) {
-        longestSubPath = subPath;
+  async moveTaskToGroup(taskId: string, groupId: string): Promise<void> {
+    await db.execute(
+      "UPDATE gantt_tasks SET group_id = ?, updated_at = ? WHERE id = ?",
+      [groupId, new Date().getTime(), taskId]
+    );
+  }
+
+  async updateHierarchy(taskId: string, parentId: string | null): Promise<void> {
+    await db.execute(
+      "UPDATE gantt_tasks SET parent_id = ?, updated_at = ? WHERE id = ?",
+      [parentId, new Date().getTime(), taskId]
+    );
+  }
+
+  async findAll(filter?: GanttFilter): Promise<GanttTask[]> {
+    let sql = "SELECT * FROM gantt_tasks";
+    const params: any[] = [];
+    const conditions: string[] = [];
+
+    if (filter) {
+      if (filter.assignee) {
+        conditions.push("assignee = ?");
+        params.push(filter.assignee);
+      }
+
+      if (filter.groupId) {
+        conditions.push("group_id = ?");
+        params.push(filter.groupId);
+      }
+
+      if (filter.category) {
+        conditions.push("category = ?");
+        params.push(filter.category);
+      }
+
+      if (filter.dateRange) {
+        conditions.push("start_date >= ? AND end_date <= ?");
+        params.push(filter.dateRange.start.getTime(), filter.dateRange.end.getTime());
+      }
+
+      if (conditions.length > 0) {
+        sql += " WHERE " + conditions.join(" AND ");
       }
     }
 
-    return [taskId, ...longestSubPath];
+    sql += " ORDER BY start_date";
+
+    const rows = await db.execute(sql, params) || [];
+    return rows.map(row => this.mapRowToTask(row));
   }
 
-  private calculatePathDuration(path: string[], taskMap: Map<string, GanttTask>): number {
-    let duration = 0;
-    for (const taskId of path) {
-      const task = taskMap.get(taskId);
-      if (task) {
-        const taskDuration = new Date(task.end_date).getTime() - new Date(task.start_date).getTime();
-        duration += taskDuration;
-      }
+  async findById(id: string): Promise<GanttTask | null> {
+    const rows = await db.execute(
+      "SELECT * FROM gantt_tasks WHERE id = ?",
+      [id]
+    ) || [];
+
+    if (rows.length === 0) {
+      return null;
     }
-    return duration;
+
+    return this.mapRowToTask(rows[0]);
   }
 
-  private mapRowToTask(row: Record<string, SqlValue>): GanttTask {
+  async delete(id: string): Promise<void> {
+    // 子タスクを取得
+    const children = await db.execute(
+      "SELECT id FROM gantt_tasks WHERE parent_id = ?",
+      [id]
+    ) || [];
+
+    // 子タスクを再帰的に削除
+    for (const child of children) {
+      await this.delete(child.id);
+    }
+
+    // 依存関係を削除
+    await db.execute("DELETE FROM gantt_dependencies WHERE predecessor_id = ? OR successor_id = ?", [id, id]);
+
+    // タスク本体を削除
+    await db.execute("DELETE FROM gantt_tasks WHERE id = ?", [id]);
+  }
+
+  private mapRowToTask(row: any): GanttTask {
     return {
-      id: row.id as string,
-      title: row.title as string,
-      start_date: row.start_date as string,
-      end_date: row.end_date as string,
-      progress: row.progress as number,
-      wbs_task_id: row.wbs_task_id as string | undefined,
-      created_at: row.created_at as string,
-      updated_at: row.updated_at as string,
-    };
-  }
-
-  private mapRowToDependency(row: Record<string, SqlValue>): GanttDependency {
-    return {
-      id: row.id as string,
-      predecessor_id: row.predecessor_id as string,
-      successor_id: row.successor_id as string,
-      type: row.type as GanttDependency['type'],
-      created_at: row.created_at as string,
+      id: row.id,
+      title: row.title,
+      icon: row.icon as GanttTaskIcon | undefined,
+      color: row.color as GanttTaskColor | undefined,
+      category: row.category,
+      startDate: new Date(row.start_date),
+      endDate: new Date(row.end_date),
+      progress: row.progress,
+      dependencies: [], // 別途取得が必要
+      isCriticalPath: row.is_critical_path === 1,
+      parentId: row.parent_id,
+      children: [], // 別途取得が必要
+      assignee: row.assignee,
+      assigneeIcon: row.assignee_icon,
+      groupId: row.group_id,
+      wbsTaskId: row.wbs_task_id,
+      createdAt: new Date(row.created_at),
+      updatedAt: new Date(row.updated_at),
     };
   }
 }

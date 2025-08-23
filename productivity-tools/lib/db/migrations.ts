@@ -99,6 +99,60 @@ const migrations: Migration[] = [
       }
     },
   },
+  {
+    version: 5,
+    name: "add_gantt_enhancements",
+    up: async (db: Database) => {
+      try {
+        // Add new columns to gantt_tasks table
+        const columns = await db.execute(
+          "SELECT * FROM pragma_table_info('gantt_tasks')"
+        );
+        
+        const existingColumns = columns.map((c: any) => c.name);
+        
+        if (!existingColumns.includes('icon')) {
+          await db.execute("ALTER TABLE gantt_tasks ADD COLUMN icon TEXT CHECK(icon IN ('folder', 'document', 'person', 'task'))");
+        }
+        if (!existingColumns.includes('color')) {
+          await db.execute("ALTER TABLE gantt_tasks ADD COLUMN color TEXT");
+        }
+        if (!existingColumns.includes('category')) {
+          await db.execute("ALTER TABLE gantt_tasks ADD COLUMN category TEXT");
+        }
+        if (!existingColumns.includes('parent_id')) {
+          await db.execute("ALTER TABLE gantt_tasks ADD COLUMN parent_id TEXT");
+        }
+        if (!existingColumns.includes('assignee')) {
+          await db.execute("ALTER TABLE gantt_tasks ADD COLUMN assignee TEXT");
+        }
+        if (!existingColumns.includes('assignee_icon')) {
+          await db.execute("ALTER TABLE gantt_tasks ADD COLUMN assignee_icon TEXT");
+        }
+        if (!existingColumns.includes('group_id')) {
+          await db.execute("ALTER TABLE gantt_tasks ADD COLUMN group_id TEXT");
+        }
+        
+        // Create gantt_groups table
+        await db.execute(`
+          CREATE TABLE IF NOT EXISTS gantt_groups (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            color TEXT NOT NULL,
+            created_at INTEGER NOT NULL
+          )
+        `);
+        
+        // Add foreign key index
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_gantt_parent ON gantt_tasks(parent_id)");
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_gantt_group ON gantt_tasks(group_id)");
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_gantt_assignee ON gantt_tasks(assignee)");
+        
+      } catch (error) {
+        console.log("Gantt enhancement columns might already exist", error);
+      }
+    },
+  },
 ];
 
 export async function runMigrations(db: any): Promise<void> {

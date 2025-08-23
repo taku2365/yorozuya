@@ -133,6 +133,12 @@ class GanttRepository {
   async updateSchedule(taskId: string, start: Date, end: Date): Promise<void>     // スケジュール更新
   async createDependency(fromId: string, toId: string): Promise<void>            // 依存関係作成
   async calculateCriticalPath(projectId: string): Promise<string[]>              // クリティカルパス計算
+  async setTaskIcon(taskId: string, icon: string): Promise<void>                 // タスクアイコン設定
+  async setTaskColor(taskId: string, color: string): Promise<void>               // タスク色設定
+  async assignMember(taskId: string, memberId: string): Promise<void>            // メンバー割り当て
+  async createTaskGroup(name: string, color: string): Promise<string>            // タスクグループ作成
+  async moveTaskToGroup(taskId: string, groupId: string): Promise<void>          // グループへタスク移動
+  async updateHierarchy(taskId: string, parentId: string | null): Promise<void>  // 階層構造更新
 }
 ```
 
@@ -152,7 +158,14 @@ class GanttRepository {
 | WBSInsertTaskButton | タスク挿入ボタン | position, onInsert |
 | WBSColumnResizer | 列幅調整機能 | columns[], onResize |
 | KanbanBoard | カンバンボード表示 | lanes[], cards[], onCardMove |
-| GanttChart | ガントチャート表示 | tasks[], dependencies[], zoom |
+| GanttChart | ガントチャート表示 | tasks[], dependencies[], zoom, viewMode |
+| GanttToolbar | ガントツールバー | viewMode, onViewChange, onMemberManage |
+| GanttTaskIcon | タスクアイコン表示 | type, size |
+| GanttColorPicker | 色選択 | colors[], onColorSelect |
+| GanttMemberSelector | メンバー選択 | members[], onMemberSelect |
+| GanttGroupManager | グループ管理 | groups[], onGroupCreate, onGroupEdit |
+| GanttViewSelector | ビュー切り替え | currentView, onViewChange |
+| GanttCalendarHeader | カレンダーヘッダー | year, month, days[], zoom |
 | DataManager | データインポート/エクスポート | onExport, onImport, onClear |
 | ThemeToggle | テーマ切り替え | theme, onThemeChange |
 
@@ -251,6 +264,14 @@ interface GanttTask {
   progress: number;
   dependencies: string[];
   isCriticalPath: boolean;
+  icon?: 'folder' | 'document' | 'person' | 'task'; // タスクアイコン
+  color?: string; // タスクバーの色（赤、青、緑、黄、紫など）
+  category?: string; // カテゴリ（色分けの基準）
+  parentId?: string; // 親タスク（階層構造）
+  children?: string[]; // 子タスク
+  assignee?: string; // 担当者
+  assigneeIcon?: string; // 担当者アイコン
+  groupId?: string; // グループID（背景色での区分け）
   wbsTaskId?: string; // リンクされたWBSタスク
   createdAt: Date;
   updatedAt: Date;
@@ -335,10 +356,18 @@ CREATE TABLE gantt_tasks (
   end_date INTEGER NOT NULL,
   progress INTEGER DEFAULT 0,
   is_critical_path INTEGER DEFAULT 0,
+  icon TEXT CHECK(icon IN ('folder', 'document', 'person', 'task')),
+  color TEXT, -- タスクバーの色
+  category TEXT, -- カテゴリ
+  parent_id TEXT, -- 親タスク
+  assignee TEXT, -- 担当者
+  assignee_icon TEXT, -- 担当者アイコン  
+  group_id TEXT, -- グループID
   wbs_task_id TEXT,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
-  FOREIGN KEY (wbs_task_id) REFERENCES wbs_tasks(id) ON DELETE SET NULL
+  FOREIGN KEY (wbs_task_id) REFERENCES wbs_tasks(id) ON DELETE SET NULL,
+  FOREIGN KEY (parent_id) REFERENCES gantt_tasks(id) ON DELETE CASCADE
 );
 
 CREATE TABLE gantt_dependencies (
