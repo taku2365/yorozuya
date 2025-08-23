@@ -54,6 +54,17 @@ const migrations: Migration[] = [
       }
     },
   },
+  {
+    version: 3,
+    name: "add_kanban_archive",
+    up: async (db: Database) => {
+      try {
+        await db.execute("ALTER TABLE kanban_cards ADD COLUMN archived INTEGER DEFAULT 0");
+      } catch (error) {
+        console.log("Archived column might already exist", error);
+      }
+    },
+  },
 ];
 
 export async function runMigrations(db: any): Promise<void> {

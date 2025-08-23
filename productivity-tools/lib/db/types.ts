@@ -49,6 +49,7 @@ export interface KanbanCard {
   position: number;
   labels?: string;
   todo_id?: string;
+  archived?: boolean;
   created_at: string;
   updated_at: string;
 }

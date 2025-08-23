@@ -34,10 +34,13 @@ interface KanbanState {
   updateCard: (id: string, data: UpdateCardDto) => Promise<void>;
   deleteCard: (id: string) => Promise<void>;
   moveCard: (cardId: string, targetLaneId: string, newPosition: number) => Promise<void>;
+  archiveCard: (id: string) => Promise<void>;
+  unarchiveCard: (id: string) => Promise<void>;
   
   // Utility functions
   getCardsByLane: (laneId: string) => KanbanCard[];
   isWipLimitReached: (laneId: string) => boolean;
+  getAllLabels: () => string[];
   
   // Utility
   reset: () => void;
@@ -225,14 +228,60 @@ export const useKanbanStore = create<KanbanState>()(
             .sort((a, b) => a.position - b.position);
         },
         
+        // Archive a card
+        archiveCard: async (id) => {
+          set({ isLoading: true, error: null });
+          try {
+            const db = await getDatabase();
+            const repository = new KanbanRepository(db);
+            await repository.archiveCard(id);
+            set((state) => ({
+              cards: state.cards.filter(card => card.id !== id),
+              isLoading: false
+            }));
+          } catch (error) {
+            set({ error: error instanceof Error ? error.message : "Failed to archive card", isLoading: false });
+          }
+        },
+        
+        // Unarchive a card
+        unarchiveCard: async (id) => {
+          set({ isLoading: true, error: null });
+          try {
+            const db = await getDatabase();
+            const repository = new KanbanRepository(db);
+            await repository.unarchiveCard(id);
+            // Refresh cards to get the updated card
+            const cards = await repository.findAllCards();
+            set({ cards, isLoading: false });
+          } catch (error) {
+            set({ error: error instanceof Error ? error.message : "Failed to unarchive card", isLoading: false });
+          }
+        },
+        
         // Check if WIP limit is reached
         isWipLimitReached: (laneId) => {
           const { lanes, cards } = get();
           const lane = lanes.find(l => l.id === laneId);
           if (!lane || !lane.wip_limit) return false;
           
-          const cardsInLane = cards.filter(card => card.lane_id === laneId);
+          const cardsInLane = cards.filter(card => card.lane_id === laneId && !card.archived);
           return cardsInLane.length >= lane.wip_limit;
+        },
+        
+        // Get all unique labels
+        getAllLabels: () => {
+          const { cards } = get();
+          const labelsSet = new Set<string>();
+          
+          cards.forEach(card => {
+            if (card.labels) {
+              const labels = card.labels.split(',').map(label => label.trim());
+              labels.forEach(label => labelsSet.add(label));
+            }
+          });
+          
+          return Array.from(labelsSet).sort();
         },
         
         // Reset store

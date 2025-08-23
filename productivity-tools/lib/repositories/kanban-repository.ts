@@ -163,12 +163,14 @@ export class KanbanRepository {
     return card;
   }
 
-  async findAllCards(): Promise<KanbanCard[]> {
-    const rows = await this.db.execute(
-      "SELECT * FROM kanban_cards ORDER BY lane_id, position",
-      []
-    );
-
+  async findAllCards(includeArchived: boolean = false): Promise<KanbanCard[]> {
+    let query = "SELECT * FROM kanban_cards";
+    if (!includeArchived) {
+      query += " WHERE (archived IS NULL OR archived = 0)";
+    }
+    query += " ORDER BY lane_id, position";
+    
+    const rows = await this.db.execute(query, []);
     return rows.map(this.mapRowToCard);
   }
 
@@ -242,6 +244,28 @@ export class KanbanRepository {
 
   async deleteCard(id: string): Promise<void> {
     await this.db.execute("DELETE FROM kanban_cards WHERE id = ?", [id]);
+  }
+
+  async archiveCard(id: string): Promise<void> {
+    await this.db.execute(
+      "UPDATE kanban_cards SET archived = 1, updated_at = ? WHERE id = ?",
+      [new Date().toISOString(), id]
+    );
+  }
+
+  async unarchiveCard(id: string): Promise<void> {
+    await this.db.execute(
+      "UPDATE kanban_cards SET archived = 0, updated_at = ? WHERE id = ?",
+      [new Date().toISOString(), id]
+    );
+  }
+
+  async findArchivedCards(): Promise<KanbanCard[]> {
+    const rows = await this.db.execute(
+      "SELECT * FROM kanban_cards WHERE archived = 1 ORDER BY updated_at DESC",
+      []
+    );
+    return rows.map(this.mapRowToCard);
   }
 
   async searchCards(keyword: string): Promise<KanbanCard[]> {
@@ -327,6 +351,7 @@ export class KanbanRepository {
       position: row.position,
       labels: row.labels || undefined,
       todo_id: row.todo_id || undefined,
+      archived: Boolean(row.archived),
       created_at: row.created_at,
       updated_at: row.updated_at,
     };
