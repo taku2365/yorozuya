@@ -4,6 +4,28 @@ test.describe("カンバンボード", () => {
   test.beforeEach(async ({ page }) => {
     await page.goto("/kanban");
     await page.waitForLoadState("networkidle");
+    
+    // レーンが存在しない場合は作成
+    const hasLanes = await page.locator(".flex-shrink-0").count() > 0;
+    if (!hasLanes) {
+      const addLaneButton = page.getByRole("button", { name: "レーンを追加" });
+      
+      // ToDoレーンを作成
+      await addLaneButton.click();
+      await page.getByLabel("レーン名").fill("ToDo");
+      await page.getByRole("button", { name: "作成" }).click();
+      
+      // 進行中レーンを作成
+      await addLaneButton.click();
+      await page.getByLabel("レーン名").fill("進行中");
+      await page.getByLabel("WIP制限").fill("3");
+      await page.getByRole("button", { name: "作成" }).click();
+      
+      // 完了レーンを作成
+      await addLaneButton.click();
+      await page.getByLabel("レーン名").fill("完了");
+      await page.getByRole("button", { name: "作成" }).click();
+    }
   });
 
   test("デフォルトレーンが作成される", async ({ page }) => {
@@ -26,10 +48,10 @@ test.describe("カンバンボード", () => {
     await page.getByLabel("レーン名").fill("完了");
     await page.getByRole("button", { name: "作成" }).click();
     
-    // レーンが表示されることを確認
-    await expect(page.getByText("ToDo")).toBeVisible();
-    await expect(page.getByText("進行中")).toBeVisible();
-    await expect(page.getByText("完了")).toBeVisible();
+    // レーンが表示されることを確認（レーンタイトル内でのみ検索）
+    await expect(page.locator(".text-base").filter({ hasText: "ToDo" })).toBeVisible();
+    await expect(page.locator(".text-base").filter({ hasText: "進行中" })).toBeVisible();
+    await expect(page.locator(".text-base").filter({ hasText: "完了" })).toBeVisible();
   });
 
   test("カードの作成", async ({ page }) => {
@@ -50,10 +72,16 @@ test.describe("カンバンボード", () => {
   });
 
   test("カードの編集", async ({ page }) => {
-    // 既存のカードを編集
-    const card = page.locator(".cursor-move").filter({ hasText: "新しいタスク" });
+    // まずカードを作成
+    const todoLane = page.locator(".flex-shrink-0").filter({ hasText: "ToDo" });
+    await todoLane.locator('svg.lucide-plus').locator('..').click();
+    await page.getByLabel("タイトル").fill("編集テスト用カード");
+    await page.getByRole("button", { name: "作成" }).click();
+    
+    // カードを編集
+    const card = page.locator(".cursor-move").filter({ hasText: "編集テスト用カード" });
     await card.hover();
-    await card.getByRole("button").click();
+    await card.locator('svg.lucide-ellipsis-vertical').locator('..').click();
     await page.getByText("編集").click();
     
     await page.getByLabel("タイトル").fill("更新されたタスク");
@@ -61,7 +89,7 @@ test.describe("カンバンボード", () => {
     
     // 更新が反映されることを確認
     await expect(page.getByText("更新されたタスク")).toBeVisible();
-    await expect(page.getByText("新しいタスク")).not.toBeVisible();
+    await expect(page.getByText("編集テスト用カード")).not.toBeVisible();
   });
 
   test("WIP制限の動作", async ({ page }) => {
@@ -84,7 +112,7 @@ test.describe("カンバンボード", () => {
 
   test("レーンの編集", async ({ page }) => {
     const todoLane = page.locator(".flex-shrink-0").filter({ hasText: "ToDo" });
-    await todoLane.getByRole("button", { name: "More" }).click();
+    await todoLane.locator('svg.lucide-ellipsis-vertical').locator('..').click();
     await page.getByText("レーンを編集").click();
     
     await page.getByLabel("レーン名").fill("バックログ");
@@ -92,8 +120,10 @@ test.describe("カンバンボード", () => {
     await page.getByRole("button", { name: "更新" }).click();
     
     // 更新が反映されることを確認
-    await expect(page.getByText("バックログ")).toBeVisible();
-    await expect(page.getByText("ToDo")).not.toBeVisible();
+    await expect(page.locator(".text-base").filter({ hasText: "バックログ" })).toBeVisible();
+    // ToDoという文字がナビゲーション以外に表示されないことを確認
+    const todoCount = await page.locator(".text-base").filter({ hasText: "ToDo" }).count();
+    expect(todoCount).toBe(0);
   });
 
   test("カードの削除", async ({ page }) => {

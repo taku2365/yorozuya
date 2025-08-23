@@ -30,8 +30,18 @@ const migrations: Migration[] = [
       
       try {
         // SQLite doesn't support multiple ALTER TABLE in one statement
-        await db.execute("ALTER TABLE wbs_tasks ADD COLUMN reviewer TEXT");
-        await db.execute("ALTER TABLE wbs_tasks ADD COLUMN due_date TEXT");
+        // Check if columns exist before adding
+        const tables = await db.execute(
+          "SELECT * FROM pragma_table_info('wbs_tasks') WHERE name IN ('reviewer', 'due_date')"
+        );
+        
+        if (!tables.some((t: any) => t.name === 'reviewer')) {
+          await db.execute("ALTER TABLE wbs_tasks ADD COLUMN reviewer TEXT");
+        }
+        
+        if (!tables.some((t: any) => t.name === 'due_date')) {
+          await db.execute("ALTER TABLE wbs_tasks ADD COLUMN due_date TEXT");
+        }
       } catch (error) {
         // Columns might already exist
         console.log("WBS enhancement columns might already exist", error);
@@ -44,22 +54,46 @@ const migrations: Migration[] = [
     up: async (db: Database) => {
       // Add new columns for professional WBS features
       try {
-        await db.execute("ALTER TABLE wbs_tasks ADD COLUMN hierarchy_number TEXT");
-        await db.execute("ALTER TABLE wbs_tasks ADD COLUMN start_date TEXT");
-        await db.execute("ALTER TABLE wbs_tasks ADD COLUMN end_date TEXT");
-        await db.execute("ALTER TABLE wbs_tasks ADD COLUMN work_days REAL");
-        await db.execute("ALTER TABLE wbs_tasks ADD COLUMN remarks TEXT");
+        // Check if columns exist before adding
+        const tables = await db.execute(
+          "SELECT * FROM pragma_table_info('wbs_tasks') WHERE name IN ('hierarchy_number', 'start_date', 'end_date', 'work_days', 'remarks')"
+        );
+        
+        const existingColumns = tables.map((t: any) => t.name);
+        
+        if (!existingColumns.includes('hierarchy_number')) {
+          await db.execute("ALTER TABLE wbs_tasks ADD COLUMN hierarchy_number TEXT");
+        }
+        if (!existingColumns.includes('start_date')) {
+          await db.execute("ALTER TABLE wbs_tasks ADD COLUMN start_date TEXT");
+        }
+        if (!existingColumns.includes('end_date')) {
+          await db.execute("ALTER TABLE wbs_tasks ADD COLUMN end_date TEXT");
+        }
+        if (!existingColumns.includes('work_days')) {
+          await db.execute("ALTER TABLE wbs_tasks ADD COLUMN work_days REAL");
+        }
+        if (!existingColumns.includes('remarks')) {
+          await db.execute("ALTER TABLE wbs_tasks ADD COLUMN remarks TEXT");
+        }
       } catch (error) {
         console.log("WBS professional feature columns might already exist", error);
       }
     },
   },
   {
-    version: 3,
+    version: 4,
     name: "add_kanban_archive",
     up: async (db: Database) => {
       try {
-        await db.execute("ALTER TABLE kanban_cards ADD COLUMN archived INTEGER DEFAULT 0");
+        // Check if column exists before adding
+        const tables = await db.execute(
+          "SELECT * FROM pragma_table_info('kanban_cards') WHERE name = 'archived'"
+        );
+        
+        if (tables.length === 0) {
+          await db.execute("ALTER TABLE kanban_cards ADD COLUMN archived INTEGER DEFAULT 0");
+        }
       } catch (error) {
         console.log("Archived column might already exist", error);
       }
@@ -95,10 +129,18 @@ export async function runMigrations(db: any): Promise<void> {
       await migration.up(db);
       
       if (db.execute) {
-        await db.execute(
-          "INSERT INTO migrations (version, name) VALUES (?, ?)",
+        // Check if migration was already recorded (for duplicate version numbers)
+        const existing = await db.execute(
+          "SELECT version FROM migrations WHERE version = ? AND name = ?",
           [migration.version, migration.name]
         );
+        
+        if (existing.length === 0) {
+          await db.execute(
+            "INSERT INTO migrations (version, name) VALUES (?, ?)",
+            [migration.version, migration.name]
+          );
+        }
       }
     }
   }
