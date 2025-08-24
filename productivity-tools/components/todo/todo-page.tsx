@@ -42,7 +42,7 @@ export function TodoPage() {
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc");
 
   useEffect(() => {
-    fetchTodos();
+    fetchTodos().catch(console.error);
   }, [fetchTodos]);
 
   const handleCreate = async (data: CreateTodoDto) => {

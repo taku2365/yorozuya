@@ -22,22 +22,77 @@
 
 ## アーキテクチャ
 
+### 全体アーキテクチャ
+
 ```mermaid
 graph TB
     subgraph "ブラウザ環境"
-        A[Next.js フロントエンド<br/>React 18 + TypeScript] --> B[状態管理層<br/>Zustand + React Query]
-        B --> C[データアクセス層<br/>Repository Pattern]
-        C --> D[SQLite WASM<br/>+ OPFS/IndexedDB]
+        A[統合UIレイヤー<br/>Next.js + React 18] --> B[統合状態管理<br/>Zustand Store]
+        B --> C[統合リポジトリ層<br/>UnifiedTaskRepository]
+        C --> D[SQLite WASM<br/>unified_tasks]
         
-        E[UIコンポーネント<br/>Shadcn/ui + Tailwind] --> A
-        F[ビジネスロジック<br/>Domain Services] --> B
+        E[ビュー切り替え<br/>Tab Navigation] --> A
+        F[共通コンポーネント<br/>Filter/Search/Actions] --> A
+        
+        subgraph "ビューアダプター"
+            G[Todo Adapter]
+            H[WBS Adapter]
+            I[Kanban Adapter]
+            J[Gantt Adapter]
+        end
+        
+        B --> G
+        B --> H
+        B --> I
+        B --> J
     end
     
     subgraph "エッジ環境"
-        G[Cloudflare Workers<br/>静的配信 + PWA]
+        K[Cloudflare Workers<br/>静的配信 + PWA]
     end
     
-    G -.初期ロード.-> A
+    K -.初期ロード.-> A
+```
+
+### 統合アーキテクチャ詳細
+
+```mermaid
+graph LR
+    subgraph "統合UI層"
+        UI1[統合ナビゲーション]
+        UI2[共通サイドバー]
+        UI3[ビューコンテナ]
+    end
+    
+    subgraph "状態管理層"
+        S1[UnifiedTaskStore]
+        S2[FilterStore]
+        S3[ViewStore]
+    end
+    
+    subgraph "データ変換層"
+        T1[TodoTransformer]
+        T2[WBSTransformer]
+        T3[KanbanTransformer]
+        T4[GanttTransformer]
+    end
+    
+    subgraph "リポジトリ層"
+        R1[UnifiedTaskRepository]
+        R2[DependencyRepository]
+        R3[LaneRepository]
+    end
+    
+    UI3 --> S1
+    S1 --> T1
+    S1 --> T2
+    S1 --> T3
+    S1 --> T4
+    
+    T1 --> R1
+    T2 --> R1
+    T3 --> R1
+    T4 --> R1
 ```
 
 ### 技術スタック
@@ -105,40 +160,64 @@ sequenceDiagram
 ### バックエンドサービス＆メソッドシグネチャ
 
 ```typescript
-// Repository層
-class TodoRepository {
-  async create(data: CreateTodoDto): Promise<Todo>      // ToDoを作成し永続化
-  async update(id: string, data: UpdateTodoDto): Promise<Todo>  // ToDo更新
-  async delete(id: string): Promise<void>               // ToDo削除
-  async findAll(filter?: TodoFilter): Promise<Todo[]>   // ToDo一覧取得
-  async findById(id: string): Promise<Todo | null>      // ToDo詳細取得
+// 統合Repository層
+class UnifiedTaskRepository {
+  // 基本CRUD操作
+  async create(task: Partial<UnifiedTask>): Promise<UnifiedTask>
+  async update(id: string, task: Partial<UnifiedTask>): Promise<UnifiedTask>
+  async delete(id: string): Promise<void>
+  async findById(id: string): Promise<UnifiedTask | null>
+  async findByType(type: UnifiedTask['type']): Promise<UnifiedTask[]>
+  async findAll(filter?: TaskFilter): Promise<UnifiedTask[]>
+  
+  // 階層構造操作
+  async findChildren(parentId: string): Promise<UnifiedTask[]>
+  async updateHierarchy(taskId: string, parentId: string | null): Promise<void>
+  async updateHierarchyNumbers(parentId: string): Promise<void>
+  async calculateProgress(taskId: string): Promise<number>
+  
+  // スケジュール操作
+  async updateSchedule(taskId: string, dates: { start?: Date; end?: Date; due?: Date }): Promise<void>
+  async calculateWorkDays(startDate: Date, endDate: Date): Promise<number>
+  
+  // カンバン操作
+  async moveToLane(taskId: string, laneId: string, position: number): Promise<void>
+  async checkWIPLimit(laneId: string): Promise<boolean>
+  
+  // 依存関係操作
+  async createDependency(predecessorId: string, successorId: string): Promise<void>
+  async removeDependency(predecessorId: string, successorId: string): Promise<void>
+  async calculateCriticalPath(projectId: string): Promise<string[]>
+  
+  // 検索・フィルタ
+  async search(query: string): Promise<UnifiedTask[]>
+  async findByDateRange(startDate: Date, endDate: Date): Promise<UnifiedTask[]>
+  async findByAssignee(assigneeId: string): Promise<UnifiedTask[]>
+  
+  // ビュー間連携
+  async linkTasks(taskId: string, relatedTasks: Partial<UnifiedTask['relatedTasks']>): Promise<void>
+  async unlinkTasks(taskId: string, viewType: keyof UnifiedTask['relatedTasks']): Promise<void>
+  
+  // 一括操作
+  async bulkUpdate(taskIds: string[], updates: Partial<UnifiedTask>): Promise<void>
+  async bulkDelete(taskIds: string[]): Promise<void>
 }
 
-class WBSRepository {
-  async createTask(data: CreateWBSTaskDto): Promise<WBSTask>    // タスク作成
-  async updateHierarchy(taskId: string, parentId: string | null): Promise<void>  // 階層更新
-  async calculateProgress(taskId: string): Promise<number>       // 進捗計算
-  async updateHierarchyNumbers(projectId: string): Promise<void> // 階層番号の再採番
-  async calculateWorkDays(startDate: Date, endDate: Date): Promise<number> // 工数計算
-  async insertTaskAfter(taskId: string, afterTaskId: string): Promise<WBSTask> // タスク挿入
+// レーン管理Repository
+class LaneRepository {
+  async create(data: CreateLaneDto): Promise<Lane>
+  async update(id: string, data: UpdateLaneDto): Promise<Lane>
+  async delete(id: string): Promise<void>
+  async findAll(): Promise<Lane[]>
+  async reorder(laneId: string, newPosition: number): Promise<void>
 }
 
-class KanbanRepository {
-  async moveCard(cardId: string, laneId: string, position: number): Promise<void>  // カード移動
-  async checkWIPLimit(laneId: string): Promise<boolean>         // WIP制限確認
-  async createLane(data: CreateLaneDto): Promise<Lane>          // レーン作成
-}
-
-class GanttRepository {
-  async updateSchedule(taskId: string, start: Date, end: Date): Promise<void>     // スケジュール更新
-  async createDependency(fromId: string, toId: string): Promise<void>            // 依存関係作成
-  async calculateCriticalPath(projectId: string): Promise<string[]>              // クリティカルパス計算
-  async setTaskIcon(taskId: string, icon: string): Promise<void>                 // タスクアイコン設定
-  async setTaskColor(taskId: string, color: string): Promise<void>               // タスク色設定
-  async assignMember(taskId: string, memberId: string): Promise<void>            // メンバー割り当て
-  async createTaskGroup(name: string, color: string): Promise<string>            // タスクグループ作成
-  async moveTaskToGroup(taskId: string, groupId: string): Promise<void>          // グループへタスク移動
-  async updateHierarchy(taskId: string, parentId: string | null): Promise<void>  // 階層構造更新
+// 依存関係管理Repository
+class DependencyRepository {
+  async create(data: CreateDependencyDto): Promise<TaskDependency>
+  async delete(id: string): Promise<void>
+  async findByTask(taskId: string): Promise<TaskDependency[]>
+  async hasCyclicDependency(predecessorId: string, successorId: string): Promise<boolean>
 }
 ```
 
@@ -146,8 +225,21 @@ class GanttRepository {
 
 | コンポーネント名 | 責任 | Props/State概要 |
 |--------------|------|----------------|
+| **統合コンポーネント** | | |
+| IntegratedLayout | 統合レイアウト管理 | currentView, onViewChange |
+| ViewSwitcher | ビュー切り替えタブ | views[], activeView, onSwitch |
+| UnifiedTaskFilter | 統合フィルタパネル | filters, onFilterChange |
+| GlobalSearch | グローバル検索 | onSearch, searchResults |
+| TaskDetailDialog | 統合タスク詳細ダイアログ | task, onSave, onClose |
+| TaskLinkManager | タスク連携管理 | task, linkedTasks, onLink, onUnlink |
+| BulkActions | 一括操作ツールバー | selectedTasks[], onBulkAction |
+| QuickActionMenu | クイックアクションメニュー | task, onAction |
+| CrossViewDnD | ビュー間ドラッグ&ドロップ | onDrop, acceptTypes[] |
+| NotificationCenter | 通知センター | notifications[], onDismiss |
+| **Todo コンポーネント** | | |
 | TodoList | ToDo一覧表示・フィルタリング | todos[], filter, onTodoClick |
 | TodoForm | ToDo作成・編集フォーム | todo?, onSubmit, onCancel |
+| **WBS コンポーネント** | | |
 | WBSTree | WBS階層構造表示 | tasks[], onTaskDrop, onTaskClick |
 | WBSTreeEnhanced | WBS拡張階層表示 | tasks[], onTaskClick, showTaskNumbers, colorByStatus, showColumnSettings |
 | WBSTaskFormEnhanced | WBS拡張タスクフォーム | task?, parentTask?, onSubmit, onCancel, enableDateCalculation |
@@ -157,7 +249,9 @@ class GanttRepository {
 | WBSTaskDelete | タスク削除機能 | task, onDelete, deleteChildren |
 | WBSInsertTaskButton | タスク挿入ボタン | position, onInsert |
 | WBSColumnResizer | 列幅調整機能 | columns[], onResize |
+| **カンバンコンポーネント** | | |
 | KanbanBoard | カンバンボード表示 | lanes[], cards[], onCardMove |
+| **ガントコンポーネント** | | |
 | GanttChart | ガントチャート表示 | tasks[], dependencies[], zoom, viewMode |
 | GanttToolbar | ガントツールバー | viewMode, onViewChange, onMemberManage |
 | GanttTaskIcon | タスクアイコン表示 | type, size |
@@ -166,6 +260,7 @@ class GanttRepository {
 | GanttGroupManager | グループ管理 | groups[], onGroupCreate, onGroupEdit |
 | GanttViewSelector | ビュー切り替え | currentView, onViewChange |
 | GanttCalendarHeader | カレンダーヘッダー | year, month, days[], zoom |
+| **共通コンポーネント** | | |
 | DataManager | データインポート/エクスポート | onExport, onImport, onClear |
 | ThemeToggle | テーマ切り替え | theme, onThemeChange |
 
@@ -182,141 +277,252 @@ class GanttRepository {
 
 ## データモデル
 
+### 統合データアーキテクチャ
+
+```mermaid
+graph TB
+    subgraph "統合データレイヤー"
+        A[UnifiedTask<br/>統一タスクモデル] --> B[SQLite WASM<br/>unified_tasks テーブル]
+        B --> C[Todo アダプター]
+        B --> D[WBS アダプター]
+        B --> E[Kanban アダプター]
+        B --> F[Gantt アダプター]
+    end
+    
+    subgraph "ビュー層"
+        C --> G[Todo UI]
+        D --> H[WBS UI]
+        E --> I[Kanban UI]
+        F --> J[Gantt UI]
+    end
+    
+    subgraph "同期メカニズム"
+        K[Zustand Store] --> A
+        K --> L[リアルタイム同期]
+        L --> B
+    end
+```
+
 ### ドメインエンティティ
-1. **Todo**: 基本的なタスク情報（タイトル、説明、期限、優先度、完了状態）
-2. **WBSTask**: 階層的タスク（親子関係、見積時間、進捗率、担当者、レビュー者、期限）
-3. **KanbanCard**: カンバンカード（タイトル、説明、レーン、ラベル、期限）
-4. **Lane**: カンバンレーン（名前、順序、WIP制限、カード）
-5. **GanttTask**: ガントタスク（開始日、終了日、依存関係、クリティカルパス）
-6. **User**: ユーザー設定（テーマ、言語、表示設定）
+1. **UnifiedTask**: 統合タスクモデル（全ビューで共通利用）
+2. **Todo**: 基本的なタスク情報（UnifiedTaskのサブセット）
+3. **WBSTask**: 階層的タスク（UnifiedTaskの拡張）
+4. **KanbanCard**: カンバンカード（UnifiedTaskの表現形式）
+5. **Lane**: カンバンレーン（カードのグルーピング）
+6. **GanttTask**: ガントタスク（UnifiedTaskのスケジュール表現）
+7. **User**: ユーザー設定（テーマ、言語、表示設定）
 
 ### エンティティ関係
 
 ```mermaid
 erDiagram
-    USER ||--o{ TODO : "creates"
-    USER ||--o{ WBS_TASK : "creates"
-    USER ||--o{ KANBAN_CARD : "creates"
+    USER ||--o{ UNIFIED_TASK : "creates"
+    UNIFIED_TASK ||--o{ UNIFIED_TASK : "parent-child"
+    UNIFIED_TASK }o--|| LANE : "kanban_lane"
+    UNIFIED_TASK ||--o{ TASK_DEPENDENCY : "has dependencies"
     
-    WBS_TASK ||--o{ WBS_TASK : "parent-child"
-    KANBAN_CARD }o--|| LANE : "belongs to"
-    GANTT_TASK ||--o{ GANTT_DEPENDENCY : "has dependencies"
+    UNIFIED_TASK {
+        string id PK
+        string type "todo|wbs|kanban|gantt"
+        string title
+        string description
+        number progress
+        boolean completed
+        datetime completed_at
+        string parent_id FK
+        number position
+        string hierarchy_number
+        datetime start_date
+        datetime end_date
+        datetime due_date
+        string assignee_id
+        string reviewer_id
+        string priority
+        string category
+        string icon
+        string color
+        number estimated_hours
+        number actual_hours
+        number work_days
+        string lane_id FK
+        string group_id
+        json metadata
+        json related_tasks
+        datetime created_at
+        datetime updated_at
+    }
     
-    TODO ||--o| KANBAN_CARD : "can be linked"
-    WBS_TASK ||--o| GANTT_TASK : "can be linked"
+    LANE {
+        string id PK
+        string title
+        number position
+        number wip_limit
+        datetime created_at
+    }
+    
+    TASK_DEPENDENCY {
+        string id PK
+        string predecessor_id FK
+        string successor_id FK
+        string dependency_type
+    }
 ```
 
 ### データモデル定義
 
 ```typescript
-// TypeScript インターフェース
-interface Todo {
+// 統合タスクモデル
+interface UnifiedTask {
+  // 基本属性
   id: string;
+  type: 'todo' | 'wbs' | 'kanban' | 'gantt';
   title: string;
   description?: string;
-  dueDate?: Date;
-  priority: 'low' | 'medium' | 'high';
+  
+  // 進捗管理
+  progress: number; // 0-100
   completed: boolean;
   completedAt?: Date;
-  createdAt: Date;
-  updatedAt: Date;
-}
-
-interface WBSTask {
-  id: string;
-  title: string;
+  
+  // 階層構造
   parentId?: string;
-  children: string[];
-  hierarchyNumber?: string; // 階層番号（例: "1.1.1"）
+  children?: string[];
+  position: number;
+  hierarchyNumber?: string;
+  
+  // スケジュール
+  startDate?: Date;
+  endDate?: Date;
+  dueDate?: Date;
+  
+  // 担当者
+  assigneeId?: string;
+  reviewerId?: string;
+  
+  // 共通拡張
+  priority?: 'high' | 'medium' | 'low';
+  labels?: string[];
+  category?: string;
+  icon?: string;
+  color?: string;
+  
+  // 工数
   estimatedHours?: number;
   actualHours?: number;
-  progress: number; // 0-100
-  assignee?: string;
-  reviewer?: string;
-  startDate?: Date; // 開始日
-  endDate?: Date; // 終了日
-  dueDate?: Date;
-  workDays?: number; // 工数（人日）
-  remarks?: string; // 備考
+  workDays?: number;
+  
+  // カンバン固有
+  laneId?: string;
+  
+  // ガント固有
   dependencies?: string[];
+  isCriticalPath?: boolean;
+  groupId?: string;
+  
+  // 関連タスク（ビュー間連携）
+  relatedTasks?: {
+    todoId?: string;
+    wbsTaskId?: string;
+    kanbanCardId?: string;
+    ganttTaskId?: string;
+  };
+  
+  // メタデータ
+  metadata?: Record<string, any>;
+  
+  // タイムスタンプ
   createdAt: Date;
   updatedAt: Date;
 }
 
-interface KanbanCard {
-  id: string;
-  title: string;
-  description?: string;
-  laneId: string;
-  position: number;
-  labels: string[];
-  dueDate?: Date;
+// ビュー固有の型定義（UnifiedTaskからの変換）
+interface Todo extends Pick<UnifiedTask, 
+  'id' | 'title' | 'description' | 'dueDate' | 'priority' | 'completed' | 'completedAt' | 'createdAt' | 'updatedAt'> {
+  // Todo固有の属性
+}
+
+interface WBSTask extends UnifiedTask {
+  // WBS固有の拡張
+  actualHours: number;
+  estimatedHours: number;
+  workDays: number;
+  remarks?: string;
+}
+
+interface KanbanCard extends Pick<UnifiedTask,
+  'id' | 'title' | 'description' | 'laneId' | 'position' | 'labels' | 'dueDate' | 'createdAt' | 'updatedAt'> {
+  // カンバン固有の属性
   todoId?: string; // リンクされたToDo
-  createdAt: Date;
-  updatedAt: Date;
 }
 
-interface GanttTask {
-  id: string;
-  title: string;
+interface GanttTask extends UnifiedTask {
+  // ガント固有の拡張
   startDate: Date;
   endDate: Date;
-  progress: number;
   dependencies: string[];
   isCriticalPath: boolean;
-  icon?: 'folder' | 'document' | 'person' | 'task'; // タスクアイコン
-  color?: string; // タスクバーの色（赤、青、緑、黄、紫など）
-  category?: string; // カテゴリ（色分けの基準）
-  parentId?: string; // 親タスク（階層構造）
-  children?: string[]; // 子タスク
-  assignee?: string; // 担当者
-  assigneeIcon?: string; // 担当者アイコン
-  groupId?: string; // グループID（背景色での区分け）
+  assigneeIcon?: string;
   wbsTaskId?: string; // リンクされたWBSタスク
-  createdAt: Date;
-  updatedAt: Date;
 }
 ```
 
 ### データベーススキーマ
 
 ```sql
--- ToDo管理
-CREATE TABLE todos (
+-- 統合タスクテーブル
+CREATE TABLE unified_tasks (
   id TEXT PRIMARY KEY,
+  type TEXT NOT NULL CHECK(type IN ('todo', 'wbs', 'kanban', 'gantt')),
   title TEXT NOT NULL,
   description TEXT,
-  due_date INTEGER,
-  priority TEXT CHECK(priority IN ('low', 'medium', 'high')),
+  progress INTEGER DEFAULT 0,
   completed INTEGER DEFAULT 0,
   completed_at INTEGER,
-  created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL
-);
-
--- WBS管理
-CREATE TABLE wbs_tasks (
-  id TEXT PRIMARY KEY,
-  title TEXT NOT NULL,
   parent_id TEXT,
   position INTEGER NOT NULL DEFAULT 0,
-  hierarchy_number TEXT, -- 階層番号（例: "1.1.1"）
+  hierarchy_number TEXT,
+  start_date INTEGER,
+  end_date INTEGER,
+  due_date INTEGER,
+  assignee_id TEXT,
+  reviewer_id TEXT,
+  priority TEXT CHECK(priority IN ('low', 'medium', 'high')),
+  category TEXT,
+  icon TEXT,
+  color TEXT,
   estimated_hours REAL,
   actual_hours REAL,
-  progress INTEGER DEFAULT 0,
-  assignee TEXT,
-  reviewer TEXT,
-  start_date INTEGER, -- 開始日
-  end_date INTEGER, -- 終了日  
-  due_date TEXT,
-  work_days REAL, -- 工数（人日）
-  remarks TEXT, -- 備考
+  work_days REAL,
+  lane_id TEXT,
+  group_id TEXT,
+  metadata TEXT, -- JSON
+  related_tasks TEXT, -- JSON
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
-  FOREIGN KEY (parent_id) REFERENCES wbs_tasks(id) ON DELETE CASCADE
+  FOREIGN KEY (parent_id) REFERENCES unified_tasks(id) ON DELETE CASCADE,
+  FOREIGN KEY (lane_id) REFERENCES kanban_lanes(id) ON DELETE SET NULL
 );
 
--- カンバンボード
+-- ラベル（多対多）
+CREATE TABLE task_labels (
+  task_id TEXT NOT NULL,
+  label TEXT NOT NULL,
+  color TEXT NOT NULL,
+  PRIMARY KEY (task_id, label),
+  FOREIGN KEY (task_id) REFERENCES unified_tasks(id) ON DELETE CASCADE
+);
+
+-- タスク依存関係
+CREATE TABLE task_dependencies (
+  id TEXT PRIMARY KEY,
+  predecessor_id TEXT NOT NULL,
+  successor_id TEXT NOT NULL,
+  dependency_type TEXT DEFAULT 'finish_to_start',
+  FOREIGN KEY (predecessor_id) REFERENCES unified_tasks(id) ON DELETE CASCADE,
+  FOREIGN KEY (successor_id) REFERENCES unified_tasks(id) ON DELETE CASCADE
+);
+
+-- カンバンレーン（独立エンティティ）
 CREATE TABLE kanban_lanes (
   id TEXT PRIMARY KEY,
   title TEXT NOT NULL,
@@ -325,72 +531,43 @@ CREATE TABLE kanban_lanes (
   created_at INTEGER NOT NULL
 );
 
-CREATE TABLE kanban_cards (
-  id TEXT PRIMARY KEY,
-  title TEXT NOT NULL,
-  description TEXT,
-  lane_id TEXT NOT NULL,
-  position INTEGER NOT NULL,
-  due_date INTEGER,
-  todo_id TEXT,
-  created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL,
-  FOREIGN KEY (lane_id) REFERENCES kanban_lanes(id) ON DELETE CASCADE,
-  FOREIGN KEY (todo_id) REFERENCES todos(id) ON DELETE SET NULL
-);
-
--- ラベル（多対多）
-CREATE TABLE card_labels (
-  card_id TEXT NOT NULL,
-  label TEXT NOT NULL,
-  color TEXT NOT NULL,
-  PRIMARY KEY (card_id, label),
-  FOREIGN KEY (card_id) REFERENCES kanban_cards(id) ON DELETE CASCADE
-);
-
--- ガントチャート
-CREATE TABLE gantt_tasks (
-  id TEXT PRIMARY KEY,
-  title TEXT NOT NULL,
-  start_date INTEGER NOT NULL,
-  end_date INTEGER NOT NULL,
-  progress INTEGER DEFAULT 0,
-  is_critical_path INTEGER DEFAULT 0,
-  icon TEXT CHECK(icon IN ('folder', 'document', 'person', 'task')),
-  color TEXT, -- タスクバーの色
-  category TEXT, -- カテゴリ
-  parent_id TEXT, -- 親タスク
-  assignee TEXT, -- 担当者
-  assignee_icon TEXT, -- 担当者アイコン  
-  group_id TEXT, -- グループID
-  wbs_task_id TEXT,
-  created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL,
-  FOREIGN KEY (wbs_task_id) REFERENCES wbs_tasks(id) ON DELETE SET NULL,
-  FOREIGN KEY (parent_id) REFERENCES gantt_tasks(id) ON DELETE CASCADE
-);
-
-CREATE TABLE gantt_dependencies (
-  id TEXT PRIMARY KEY,
-  predecessor_id TEXT NOT NULL,
-  successor_id TEXT NOT NULL,
-  FOREIGN KEY (predecessor_id) REFERENCES gantt_tasks(id) ON DELETE CASCADE,
-  FOREIGN KEY (successor_id) REFERENCES gantt_tasks(id) ON DELETE CASCADE
-);
-
 -- インデックス
-CREATE INDEX idx_todos_due_date ON todos(due_date);
-CREATE INDEX idx_todos_completed ON todos(completed);
-CREATE INDEX idx_wbs_parent ON wbs_tasks(parent_id);
-CREATE INDEX idx_cards_lane ON kanban_cards(lane_id);
-CREATE INDEX idx_gantt_dates ON gantt_tasks(start_date, end_date);
+CREATE INDEX idx_tasks_type ON unified_tasks(type);
+CREATE INDEX idx_tasks_parent ON unified_tasks(parent_id);
+CREATE INDEX idx_tasks_due_date ON unified_tasks(due_date);
+CREATE INDEX idx_tasks_completed ON unified_tasks(completed);
+CREATE INDEX idx_tasks_lane ON unified_tasks(lane_id);
+CREATE INDEX idx_tasks_assignee ON unified_tasks(assignee_id);
+CREATE INDEX idx_tasks_dates ON unified_tasks(start_date, end_date);
+
+-- ビュー（互換性レイヤー）
+CREATE VIEW todos AS 
+  SELECT id, title, description, due_date, priority, completed, completed_at, created_at, updated_at
+  FROM unified_tasks 
+  WHERE type = 'todo' OR (type != 'todo' AND due_date IS NOT NULL);
+
+CREATE VIEW wbs_tasks AS
+  SELECT * FROM unified_tasks WHERE type = 'wbs';
+
+CREATE VIEW kanban_cards AS
+  SELECT id, title, description, lane_id, position, due_date, created_at, updated_at,
+         json_extract(related_tasks, '$.todoId') as todo_id
+  FROM unified_tasks 
+  WHERE lane_id IS NOT NULL;
+
+CREATE VIEW gantt_tasks AS
+  SELECT *, json_extract(related_tasks, '$.wbsTaskId') as wbs_task_id
+  FROM unified_tasks 
+  WHERE type = 'gantt' OR (start_date IS NOT NULL AND end_date IS NOT NULL);
 ```
 
 ### マイグレーション戦略
-- 初回起動時に自動的にスキーマを作成
+- 初回起動時に統合スキーマを作成
+- 既存データを統合テーブルに移行するマイグレーションスクリプト
 - バージョン管理テーブルでスキーマバージョンを追跡
 - 新バージョンでは自動マイグレーションを実行
 - データ変換は可逆的に設計し、ロールバック可能に
+- 既存ビューを通じた後方互換性の維持
 
 ## エラーハンドリング
 

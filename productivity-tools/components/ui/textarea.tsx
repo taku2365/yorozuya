@@ -13,6 +13,8 @@ const Textarea = React.forwardRef<
         className
       )}
       ref={ref}
+      spellCheck={false}
+      data-ms-editor="false"
       {...props}
     />
   )

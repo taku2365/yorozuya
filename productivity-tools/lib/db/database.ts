@@ -21,7 +21,7 @@ export class Database {
     // TODO: Implement OPFS persistence later
     this.db = new sqlite3.oo1.DB(":memory:", "c");
 
-    // Create tables
+    // Create tables - no need to check initialized here since we're in the process of initializing
     await this.createTables();
     
     // Run migrations
@@ -44,7 +44,9 @@ export class Database {
   }
 
   async getTables(): Promise<string[]> {
-    if (!this.db) throw new Error("Database not initialized");
+    if (!this.db) {
+      throw new Error("Database not initialized");
+    }
     const result = this.db.exec({
       sql: "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'",
       returnValue: "resultRows",
@@ -54,7 +56,9 @@ export class Database {
   }
 
   async execute<T = Record<string, SqlValue>>(sql: string, params: SqlValue[] = []): Promise<T[]> {
-    if (!this.db) throw new Error("Database not initialized");
+    if (!this.db) {
+      throw new Error("Database not initialized");
+    }
     
     // For DDL statements (CREATE, ALTER, DROP), use exec without expecting results
     if (sql.trim().toUpperCase().match(/^(CREATE|ALTER|DROP|INSERT|UPDATE|DELETE)/)) {
@@ -78,7 +82,10 @@ export class Database {
   }
 
   private async createTables(): Promise<void> {
-    if (!this.db) throw new Error("Database not initialized");
+    // Remove the check for initialized since we're calling this during initialization
+    if (!this.db) {
+      throw new Error("Database not initialized");
+    }
     
     // Create todos table
     this.db.exec(`

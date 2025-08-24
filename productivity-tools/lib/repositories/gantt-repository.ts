@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from "uuid";
-import { db } from "../db";
+import type { Database } from "../db/database";
 import type { 
   GanttTask, 
   CreateGanttTaskDto, 
@@ -10,6 +10,8 @@ import type {
 } from "../types/gantt";
 
 export class GanttRepository {
+  constructor(private db: Database) {}
+
   async create(data: CreateGanttTaskDto): Promise<GanttTask> {
     const id = uuidv4();
     const now = new Date();
@@ -34,7 +36,7 @@ export class GanttRepository {
       updatedAt: now,
     };
 
-    await db.execute(
+    await this.db.execute(
       `INSERT INTO gantt_tasks (
         id, title, icon, color, category, start_date, end_date, 
         progress, is_critical_path, parent_id, assignee, group_id, 
@@ -121,13 +123,13 @@ export class GanttRepository {
 
     params.push(id);
 
-    await db.execute(
+    await this.db.execute(
       `UPDATE gantt_tasks SET ${fields.join(", ")} WHERE id = ?`,
       params
     );
 
     // モックデータを返す（テスト環境用）
-    const rows = await db.execute(
+    const rows = await this.db.execute(
       "SELECT * FROM gantt_tasks WHERE id = ?",
       [id]
     );
@@ -140,13 +142,13 @@ export class GanttRepository {
   }
 
   async updateSchedule(taskId: string, startDate: Date, endDate: Date): Promise<void> {
-    await db.execute(
+    await this.db.execute(
       "UPDATE gantt_tasks SET start_date = ?, end_date = ?, updated_at = ? WHERE id = ?",
       [startDate.getTime(), endDate.getTime(), new Date().getTime(), taskId]
     );
 
     // 依存タスクの自動調整
-    const dependencies = await db.execute(
+    const dependencies = await this.db.execute(
       "SELECT * FROM gantt_dependencies WHERE predecessor_id = ?",
       [taskId]
     ) || [];
@@ -165,7 +167,7 @@ export class GanttRepository {
 
   async createDependency(fromId: string, toId: string): Promise<void> {
     // 循環依存チェック
-    const existingDeps = await db.execute(
+    const existingDeps = await this.db.execute(
       "SELECT * FROM gantt_dependencies WHERE predecessor_id = ? AND successor_id = ?",
       [toId, fromId]
     ) || [];
@@ -175,7 +177,7 @@ export class GanttRepository {
     }
 
     const id = uuidv4();
-    await db.execute(
+    await this.db.execute(
       "INSERT INTO gantt_dependencies (id, predecessor_id, successor_id) VALUES (?, ?, ?)",
       [id, fromId, toId]
     );
@@ -183,7 +185,7 @@ export class GanttRepository {
 
   async calculateCriticalPath(projectId: string): Promise<string[]> {
     const tasks = await this.findAll();
-    const dependencies = await db.execute(
+    const dependencies = await this.db.execute(
       "SELECT * FROM gantt_dependencies",
       []
     ) || [];
@@ -242,21 +244,21 @@ export class GanttRepository {
   }
 
   async setTaskIcon(taskId: string, icon: GanttTaskIcon): Promise<void> {
-    await db.execute(
+    await this.db.execute(
       "UPDATE gantt_tasks SET icon = ?, updated_at = ? WHERE id = ?",
       [icon, new Date().getTime(), taskId]
     );
   }
 
   async setTaskColor(taskId: string, color: GanttTaskColor): Promise<void> {
-    await db.execute(
+    await this.db.execute(
       "UPDATE gantt_tasks SET color = ?, updated_at = ? WHERE id = ?",
       [color, new Date().getTime(), taskId]
     );
   }
 
   async assignMember(taskId: string, memberId: string): Promise<void> {
-    await db.execute(
+    await this.db.execute(
       "UPDATE gantt_tasks SET assignee = ?, updated_at = ? WHERE id = ?",
       [memberId, new Date().getTime(), taskId]
     );
@@ -264,7 +266,7 @@ export class GanttRepository {
 
   async createTaskGroup(name: string, color: string): Promise<string> {
     const id = uuidv4();
-    await db.execute(
+    await this.db.execute(
       "INSERT INTO gantt_groups (id, name, color, created_at) VALUES (?, ?, ?, ?)",
       [id, name, color, new Date().getTime()]
     );
@@ -272,14 +274,14 @@ export class GanttRepository {
   }
 
   async moveTaskToGroup(taskId: string, groupId: string): Promise<void> {
-    await db.execute(
+    await this.db.execute(
       "UPDATE gantt_tasks SET group_id = ?, updated_at = ? WHERE id = ?",
       [groupId, new Date().getTime(), taskId]
     );
   }
 
   async updateHierarchy(taskId: string, parentId: string | null): Promise<void> {
-    await db.execute(
+    await this.db.execute(
       "UPDATE gantt_tasks SET parent_id = ?, updated_at = ? WHERE id = ?",
       [parentId, new Date().getTime(), taskId]
     );
@@ -318,12 +320,12 @@ export class GanttRepository {
 
     sql += " ORDER BY start_date";
 
-    const rows = await db.execute(sql, params) || [];
+    const rows = await this.db.execute(sql, params) || [];
     return rows.map(row => this.mapRowToTask(row));
   }
 
   async findById(id: string): Promise<GanttTask | null> {
-    const rows = await db.execute(
+    const rows = await this.db.execute(
       "SELECT * FROM gantt_tasks WHERE id = ?",
       [id]
     ) || [];
@@ -337,7 +339,7 @@ export class GanttRepository {
 
   async delete(id: string): Promise<void> {
     // 子タスクを取得
-    const children = await db.execute(
+    const children = await this.db.execute(
       "SELECT id FROM gantt_tasks WHERE parent_id = ?",
       [id]
     ) || [];
@@ -348,10 +350,10 @@ export class GanttRepository {
     }
 
     // 依存関係を削除
-    await db.execute("DELETE FROM gantt_dependencies WHERE predecessor_id = ? OR successor_id = ?", [id, id]);
+    await this.db.execute("DELETE FROM gantt_dependencies WHERE predecessor_id = ? OR successor_id = ?", [id, id]);
 
     // タスク本体を削除
-    await db.execute("DELETE FROM gantt_tasks WHERE id = ?", [id]);
+    await this.db.execute("DELETE FROM gantt_tasks WHERE id = ?", [id]);
   }
 
   private mapRowToTask(row: any): GanttTask {

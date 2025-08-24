@@ -153,6 +153,138 @@ const migrations: Migration[] = [
       }
     },
   },
+  {
+    version: 6,
+    name: "add_unified_tasks",
+    up: async (db: Database) => {
+      try {
+        // Create unified_tasks table
+        await db.execute(`
+          CREATE TABLE IF NOT EXISTS unified_tasks (
+            id TEXT PRIMARY KEY,
+            title TEXT NOT NULL,
+            description TEXT,
+            
+            -- Status management
+            status TEXT NOT NULL CHECK(status IN ('not_started', 'in_progress', 'completed', 'on_hold', 'cancelled')),
+            priority TEXT NOT NULL CHECK(priority IN ('low', 'medium', 'high', 'urgent')),
+            progress INTEGER NOT NULL DEFAULT 0 CHECK(progress >= 0 AND progress <= 100),
+            
+            -- Date management
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            start_date TEXT,
+            end_date TEXT,
+            due_date TEXT,
+            
+            -- Assignees
+            assignee_id TEXT,
+            assignee_name TEXT,
+            reviewer_id TEXT,
+            reviewer_name TEXT,
+            
+            -- Hierarchy
+            parent_id TEXT,
+            task_order INTEGER NOT NULL DEFAULT 0,
+            hierarchy_level INTEGER NOT NULL DEFAULT 0,
+            
+            -- Source information
+            source_type TEXT NOT NULL CHECK(source_type IN ('todo', 'wbs', 'kanban', 'gantt')),
+            source_id TEXT NOT NULL,
+            
+            -- Metadata stored as JSON
+            metadata TEXT NOT NULL DEFAULT '{}',
+            
+            FOREIGN KEY (parent_id) REFERENCES unified_tasks(id) ON DELETE CASCADE
+          )
+        `);
+        
+        // Create task_mappings table for tracking relationships
+        await db.execute(`
+          CREATE TABLE IF NOT EXISTS task_mappings (
+            unified_id TEXT PRIMARY KEY,
+            todo_id TEXT,
+            wbs_id TEXT,
+            kanban_card_id TEXT,
+            gantt_task_id TEXT,
+            
+            FOREIGN KEY (unified_id) REFERENCES unified_tasks(id) ON DELETE CASCADE,
+            FOREIGN KEY (todo_id) REFERENCES todos(id) ON DELETE CASCADE,
+            FOREIGN KEY (wbs_id) REFERENCES wbs_tasks(id) ON DELETE CASCADE,
+            FOREIGN KEY (kanban_card_id) REFERENCES kanban_cards(id) ON DELETE CASCADE,
+            FOREIGN KEY (gantt_task_id) REFERENCES gantt_tasks(id) ON DELETE CASCADE
+          )
+        `);
+        
+        // Create task_tags table
+        await db.execute(`
+          CREATE TABLE IF NOT EXISTS task_tags (
+            id TEXT PRIMARY KEY,
+            task_id TEXT NOT NULL,
+            tag TEXT NOT NULL,
+            
+            FOREIGN KEY (task_id) REFERENCES unified_tasks(id) ON DELETE CASCADE,
+            UNIQUE(task_id, tag)
+          )
+        `);
+        
+        // Create task_labels table
+        await db.execute(`
+          CREATE TABLE IF NOT EXISTS task_labels (
+            id TEXT PRIMARY KEY,
+            task_id TEXT NOT NULL,
+            label_id TEXT NOT NULL,
+            label_name TEXT NOT NULL,
+            label_color TEXT NOT NULL,
+            
+            FOREIGN KEY (task_id) REFERENCES unified_tasks(id) ON DELETE CASCADE,
+            UNIQUE(task_id, label_id)
+          )
+        `);
+        
+        // Create task_history table
+        await db.execute(`
+          CREATE TABLE IF NOT EXISTS task_history (
+            id TEXT PRIMARY KEY,
+            task_id TEXT NOT NULL,
+            timestamp TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            user_name TEXT NOT NULL,
+            action TEXT NOT NULL,
+            changes TEXT NOT NULL DEFAULT '{}',
+            
+            FOREIGN KEY (task_id) REFERENCES unified_tasks(id) ON DELETE CASCADE
+          )
+        `);
+        
+        // Create indexes for performance
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_unified_status ON unified_tasks(status)");
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_unified_priority ON unified_tasks(priority)");
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_unified_assignee ON unified_tasks(assignee_id)");
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_unified_parent ON unified_tasks(parent_id)");
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_unified_source ON unified_tasks(source_type, source_id)");
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_unified_dates ON unified_tasks(start_date, end_date, due_date)");
+        
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_mappings_todo ON task_mappings(todo_id)");
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_mappings_wbs ON task_mappings(wbs_id)");
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_mappings_kanban ON task_mappings(kanban_card_id)");
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_mappings_gantt ON task_mappings(gantt_task_id)");
+        
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_tags_task ON task_tags(task_id)");
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_tags_tag ON task_tags(tag)");
+        
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_labels_task ON task_labels(task_id)");
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_labels_label ON task_labels(label_id)");
+        
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_history_task ON task_history(task_id)");
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_history_timestamp ON task_history(timestamp)");
+        
+      } catch (error) {
+        console.log("Error creating unified tasks schema", error);
+        throw error;
+      }
+    },
+  },
 ];
 
 export async function runMigrations(db: any): Promise<void> {
