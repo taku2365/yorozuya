@@ -6,6 +6,10 @@ import { TodoForm } from "./todo-form";
 import { TodoFilter } from "./todo-filter";
 import { TodoSearch } from "./todo-search";
 import { Button } from "@/components/ui/button";
+import { ArrowRightLeft } from "lucide-react";
+import { TaskTransferDialog } from "@/components/shared/task-transfer-dialog";
+import { getTaskTransferClient } from "@/lib/api/task-transfer-client";
+import { useToast } from "@/hooks/use-toast";
 import {
   Dialog,
   DialogContent,
@@ -40,6 +44,8 @@ export function TodoPage() {
   const [todoToDelete, setTodoToDelete] = useState<Todo | null>(null);
   const [sortBy, setSortBy] = useState<string | null>(null);
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc");
+  const [isTransferOpen, setIsTransferOpen] = useState(false);
+  const { toast } = useToast();
 
   useEffect(() => {
     fetchTodos().catch(console.error);
@@ -54,6 +60,14 @@ export function TodoPage() {
     if (editingTodo) {
       await updateTodo(editingTodo.id, data);
       setEditingTodo(null);
+      
+      // タスクが他のビューにリンクされている場合は同期
+      try {
+        const transferClient = getTaskTransferClient();
+        await transferClient.syncTask('todo', editingTodo.id);
+      } catch (error) {
+        console.log('同期は不要またはエラー:', error);
+      }
     }
   };
 
@@ -120,6 +134,41 @@ export function TodoPage() {
       })
     : displayTodos;
 
+  const handleTransfer = async (params: {
+    taskIds: string[];
+    targetViews: ('todo' | 'wbs' | 'kanban' | 'gantt')[];
+    syncEnabled: boolean;
+  }) => {
+    try {
+      const transferClient = getTaskTransferClient();
+      const result = await transferClient.transferTasks({
+        sourceView: 'todo',
+        ...params,
+      });
+
+      if (result.success) {
+        toast({
+          title: '転送完了',
+          description: `${result.transferred.length}件のタスクを転送しました`,
+        });
+        setIsTransferOpen(false);
+        fetchTodos(); // リロード
+      } else {
+        toast({
+          title: '転送エラー',
+          description: result.errors.join(', '),
+          variant: 'destructive',
+        });
+      }
+    } catch (error) {
+      toast({
+        title: '転送エラー',
+        description: error instanceof Error ? error.message : 'タスク転送中にエラーが発生しました',
+        variant: 'destructive',
+      });
+    }
+  };
+
   if (error) {
     return (
       <div className="container mx-auto p-4">
@@ -132,9 +181,19 @@ export function TodoPage() {
     <div className="container mx-auto p-4">
       <div className="mb-6 flex items-center justify-between">
         <h1 className="text-2xl font-bold">ToDo管理</h1>
-        <Button onClick={() => setIsCreateOpen(true)}>
-          新規ToDo作成
-        </Button>
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            onClick={() => setIsTransferOpen(true)}
+            disabled={todos.length === 0}
+          >
+            <ArrowRightLeft className="mr-2 h-4 w-4" />
+            他のビューへ移動
+          </Button>
+          <Button onClick={() => setIsCreateOpen(true)}>
+            新規ToDo作成
+          </Button>
+        </div>
       </div>
 
       <div className="mb-6 space-y-4">
@@ -219,6 +278,15 @@ export function TodoPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Transfer Dialog */}
+      <TaskTransferDialog
+        isOpen={isTransferOpen}
+        tasks={todos}
+        sourceView="todo"
+        onTransfer={handleTransfer}
+        onClose={() => setIsTransferOpen(false)}
+      />
     </div>
   );
 }

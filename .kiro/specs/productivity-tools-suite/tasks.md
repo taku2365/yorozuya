@@ -308,22 +308,22 @@
   - リアルタイム検索結果表示
   - _Requirements: 6.6, 6.8, 7.3_
 
-- [ ] 12. ビュー間連携（Phase 3 - 2週間）
-- [ ] 12.1 Zustand統合ストア
+- [x] 12. ビュー間連携（Phase 3 - 2週間）
+- [x] 12.1 Zustand統合ストア
   - UnifiedTaskStoreの実装
   - ViewStoreの実装
   - FilterStoreの実装
   - ストア間同期メカニズム
   - _Requirements: 6.1, 6.2, 6.3, 7.6_
 
-- [ ] 12.2 ビューアダプター
+- [x] 12.2 ビューアダプター
   - TodoAdapterの実装
   - WBSAdapterの実装
   - KanbanAdapterの実装
   - GanttAdapterの実装
   - _Requirements: 6.1, 6.2, 6.3, 6.4_
 
-- [ ] 12.3 ドラッグ&ドロップ連携
+- [x] 12.3 ドラッグ&ドロップ連携
   - CrossViewDnDフックの実装
   - ビュー間タスク移動機能
   - データ変換ロジック

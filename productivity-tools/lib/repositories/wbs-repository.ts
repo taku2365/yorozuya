@@ -6,23 +6,33 @@ import { generateHierarchyNumber, recalculateHierarchyNumbers } from "../utils/w
 import { determineInsertionHierarchy, getTasksToRenumber } from "../utils/wbs-insert-logic";
 
 export interface CreateWBSTaskDto {
-  title: string;
+  name?: string; // タスク転送サービス用に追加
+  title?: string;
+  description?: string;
+  status?: 'not_started' | 'in_progress' | 'completed';
   parent_id?: string;
+  parentId?: string | null; // タスク転送サービス用
   position?: number;
+  order?: number; // タスク転送サービス用
   hierarchy_number?: string;
+  hierarchyNumber?: string; // タスク転送サービス用
   estimated_hours?: number;
   progress?: number;
-  assignee?: string;
+  assignee?: string | null;
   reviewer?: string;
   start_date?: string;
+  startDate?: string; // タスク転送サービス用
   end_date?: string;
+  endDate?: string; // タスク転送サービス用
   due_date?: string;
   work_days?: number;
   remarks?: string;
 }
 
 export interface UpdateWBSTaskDto {
+  name?: string;
   title?: string;
+  status?: 'not_started' | 'in_progress' | 'completed';
   hierarchy_number?: string;
   estimated_hours?: number;
   actual_hours?: number;
@@ -43,14 +53,22 @@ export class WBSRepository {
     const id = uuidv4();
     const now = new Date().toISOString();
     
+    // 互換性のためのマッピング
+    const title = data.name || data.title || '';
+    const parent_id = data.parentId !== undefined ? data.parentId : data.parent_id;
+    const position = data.order !== undefined ? data.order : (data.position ?? 0);
+    const hierarchy_number = data.hierarchyNumber || data.hierarchy_number;
+    const start_date = data.startDate || data.start_date;
+    const end_date = data.endDate || data.end_date;
+    
     const task: WBSTask = {
       id,
-      title: data.title,
-      parent_id: data.parent_id,
-      position: data.position ?? 0,
+      title,
+      parent_id,
+      position,
       estimated_hours: data.estimated_hours,
       actual_hours: undefined,
-      progress: 0,
+      progress: data.progress ?? 0,
       assignee: data.assignee,
       reviewer: data.reviewer,
       due_date: data.due_date,

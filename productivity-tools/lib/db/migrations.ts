@@ -132,6 +132,9 @@ const migrations: Migration[] = [
         if (!existingColumns.includes('group_id')) {
           await db.execute("ALTER TABLE gantt_tasks ADD COLUMN group_id TEXT");
         }
+        if (!existingColumns.includes('is_critical_path')) {
+          await db.execute("ALTER TABLE gantt_tasks ADD COLUMN is_critical_path INTEGER DEFAULT 0");
+        }
         
         // Create gantt_groups table
         await db.execute(`
@@ -285,6 +288,36 @@ const migrations: Migration[] = [
       }
     },
   },
+  {
+    version: 7,
+    name: "add_task_links_table",
+    up: async (db: Database) => {
+      try {
+        // Create task_links table for cross-view task synchronization
+        await db.execute(`
+          CREATE TABLE IF NOT EXISTS task_links (
+            id TEXT PRIMARY KEY,
+            unifiedId TEXT NOT NULL,
+            viewType TEXT NOT NULL CHECK(viewType IN ('todo', 'wbs', 'kanban', 'gantt')),
+            originalId TEXT NOT NULL,
+            syncEnabled INTEGER NOT NULL DEFAULT 1,
+            createdAt TEXT NOT NULL,
+            lastSyncedAt TEXT NOT NULL,
+            
+            UNIQUE(viewType, originalId)
+          )
+        `);
+        
+        // Create indexes
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_task_links_unified ON task_links(unifiedId)");
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_task_links_view ON task_links(viewType, originalId)");
+        
+      } catch (error) {
+        console.log("Error creating task_links table", error);
+        throw error;
+      }
+    },
+  },
 ];
 
 export async function runMigrations(db: any): Promise<void> {
@@ -315,10 +348,10 @@ export async function runMigrations(db: any): Promise<void> {
       await migration.up(db);
       
       if (db.execute) {
-        // Check if migration was already recorded (for duplicate version numbers)
+        // Check if migration was already recorded
         const existing = await db.execute(
-          "SELECT version FROM migrations WHERE version = ? AND name = ?",
-          [migration.version, migration.name]
+          "SELECT version FROM migrations WHERE version = ?",
+          [migration.version]
         );
         
         if (existing.length === 0) {

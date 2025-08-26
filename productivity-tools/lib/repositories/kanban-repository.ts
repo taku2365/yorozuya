@@ -278,6 +278,37 @@ export class KanbanRepository {
     return rows.map(this.mapRowToCard);
   }
 
+  async findCardById(id: string): Promise<KanbanCard | null> {
+    const rows = await this.db.execute(
+      "SELECT * FROM kanban_cards WHERE id = ?",
+      [id]
+    );
+    
+    if (rows.length === 0) return null;
+    return this.mapRowToCard(rows[0]);
+  }
+
+  async findDefaultLane(): Promise<KanbanLane | null> {
+    // todoレーンをデフォルトとして扱う
+    const lanes = await this.findAllLanes();
+    let defaultLane = lanes.find(lane => lane.id === 'todo' || lane.title.toLowerCase() === 'todo') || lanes[0];
+    
+    // デフォルトレーンが存在しない場合は作成
+    if (!defaultLane && lanes.length === 0) {
+      defaultLane = await this.createLane({
+        title: 'ToDo',
+        position: 0,
+        wip_limit: null,
+      });
+    }
+    
+    return defaultLane || null;
+  }
+
+  async update(id: string, data: UpdateCardDto): Promise<KanbanCard | null> {
+    return this.updateCard(id, data);
+  }
+
   async findCardsByLabel(label: string): Promise<KanbanCard[]> {
     const labelPattern = `%${label}%`;
     const rows = await this.db.execute(

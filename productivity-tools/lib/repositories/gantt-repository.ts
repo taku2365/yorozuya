@@ -16,14 +16,22 @@ export class GanttRepository {
     const id = uuidv4();
     const now = new Date();
     
+    // 日付をDateオブジェクトに変換
+    const startDate = data.startDate instanceof Date 
+      ? data.startDate 
+      : new Date(data.startDate);
+    const endDate = data.endDate instanceof Date 
+      ? data.endDate 
+      : new Date(data.endDate);
+    
     const task: GanttTask = {
       id,
       title: data.title,
       icon: data.icon,
       color: data.color,
       category: data.category,
-      startDate: data.startDate,
-      endDate: data.endDate,
+      startDate,
+      endDate,
       progress: data.progress ?? 0,
       dependencies: [],
       isCriticalPath: false,
